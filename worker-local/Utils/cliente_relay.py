@@ -33,7 +33,7 @@ def marcar_fallo(cola_id: int):
 
 def relay_esta_online() -> bool:
     try:
-        r = requests.get(f"{RELAY_URL}/health", timeout=5)
+        r = requests.get(f"{RELAY_URL}/health", timeout=60)
         return r.status_code == 200
     except requests.RequestException:
         return False

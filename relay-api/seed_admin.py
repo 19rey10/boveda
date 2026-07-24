@@ -9,6 +9,9 @@ Uso:
 import getpass
 import sys
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from Datos.db import SessionLocal, crear_tablas
 from Datos.modelos import Usuario
 from Funciones.auth import hashear_password
