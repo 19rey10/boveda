@@ -115,3 +115,19 @@ class SolicitudEliminacion(Base):
     ruta_ssd = Column(String(500), nullable=False)
     listo = Column(Boolean, default=False)
     creado_en = Column(DateTime, default=datetime.utcnow)
+
+
+class CodigoInvitacion(Base):
+    """
+    Codigos de invitacion de un solo uso. Solo un admin los genera. Una
+    vez usado para registrarse, queda marcado y no sirve mas para nadie.
+    """
+    __tablename__ = "codigos_invitacion"
+
+    id = Column(Integer, primary_key=True)
+    codigo = Column(String(20), unique=True, nullable=False, index=True)
+    creado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    usado = Column(Boolean, default=False)
+    usado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    creado_en = Column(DateTime, default=datetime.utcnow)
+    usado_en = Column(DateTime, nullable=True)

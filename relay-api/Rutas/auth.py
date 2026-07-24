@@ -1,18 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
-import os
+from datetime import datetime
 
 from Datos.db import obtener_db
-from Datos.modelos import Usuario, TokenRecuperacion
+from Datos.modelos import Usuario, TokenRecuperacion, CodigoInvitacion
 from Funciones.auth import (
     hashear_password, verificar_password, crear_token, generar_token_recuperacion
 )
 from Funciones.correo import enviar_email_recuperacion
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-CODIGO_INVITACION = os.getenv("CODIGO_INVITACION")
 
 
 class RegistroIn(BaseModel):
@@ -39,8 +37,13 @@ class ResetIn(BaseModel):
 
 @router.post("/registro")
 def registro(datos: RegistroIn, db: Session = Depends(obtener_db)):
-    if not CODIGO_INVITACION or datos.codigo_invitacion != CODIGO_INVITACION:
-        raise HTTPException(403, "Código de invitación inválido")
+    codigo = (
+        db.query(CodigoInvitacion)
+        .filter(CodigoInvitacion.codigo == datos.codigo_invitacion, CodigoInvitacion.usado.is_(False))
+        .first()
+    )
+    if not codigo:
+        raise HTTPException(403, "Código de invitación inválido o ya usado")
 
     existe = db.query(Usuario).filter(
         (Usuario.username == datos.username) | (Usuario.email == datos.email)
@@ -57,6 +60,12 @@ def registro(datos: RegistroIn, db: Session = Depends(obtener_db)):
     db.add(usuario)
     db.commit()
     db.refresh(usuario)
+
+    codigo.usado = True
+    codigo.usado_por_id = usuario.id
+    codigo.usado_en = datetime.utcnow()
+    db.commit()
+
     return {"mensaje": "Cuenta creada", "usuario_id": usuario.id}
 
 
