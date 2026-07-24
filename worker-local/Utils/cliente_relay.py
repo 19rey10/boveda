@@ -58,6 +58,20 @@ def completar_descarga(solicitud_id: int, contenido: bytes, nombre_archivo: str)
     )
 
 
+def obtener_eliminaciones_pendientes() -> list[dict]:
+    r = requests.get(f"{RELAY_URL}/sync/eliminaciones-pendientes", headers=HEADERS, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+def completar_eliminacion(solicitud_id: int):
+    requests.post(
+        f"{RELAY_URL}/sync/eliminaciones-pendientes/{solicitud_id}/completar",
+        headers=HEADERS,
+        timeout=15,
+    )
+
+
 def relay_esta_online() -> bool:
     try:
         r = requests.get(f"{RELAY_URL}/health", timeout=60)

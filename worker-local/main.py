@@ -24,6 +24,7 @@ load_dotenv()
 from Utils.cliente_relay import (
     obtener_pendientes, confirmar, marcar_fallo, relay_esta_online,
     subir_miniatura, obtener_descargas_pendientes, completar_descarga,
+    obtener_eliminaciones_pendientes, completar_eliminacion,
 )
 from Funciones.exif_utils import fecha_de_imagen, fecha_de_video, generar_miniatura
 from Funciones.almacenamiento import guardar_archivo, espacio_disponible_gb
@@ -86,6 +87,26 @@ def procesar_descargas_pendientes():
             print(f"  Error resolviendo descarga de {ruta}: {e}")
 
 
+def procesar_eliminaciones_pendientes():
+    """Borra fisicamente de la SSD los archivos que un usuario elimino
+    desde la app."""
+    try:
+        pendientes = obtener_eliminaciones_pendientes()
+    except Exception as e:
+        print(f"  No se pudo consultar eliminaciones pendientes: {e}")
+        return
+
+    for p in pendientes:
+        ruta = p.get("ruta_ssd")
+        try:
+            if ruta and os.path.exists(ruta):
+                os.remove(ruta)
+                print(f"  Borrado de la SSD -> {ruta}")
+            completar_eliminacion(p["id"])
+        except Exception as e:
+            print(f"  Error borrando {ruta}: {e}")
+
+
 def ciclo():
     if not relay_esta_online():
         print(f"[{datetime.now()}] Relay no disponible, reintento en {INTERVALO_SEGUNDOS}s")
@@ -108,6 +129,7 @@ def ciclo():
                 marcar_fallo(item["cola_id"])
 
     procesar_descargas_pendientes()
+    procesar_eliminaciones_pendientes()
 
 
 if __name__ == "__main__":
