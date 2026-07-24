@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from Datos.db import obtener_db
-from Datos.modelos import Archivo, Usuario, SolicitudDescarga
+from Datos.modelos import Archivo, Usuario, SolicitudDescarga, SolicitudEliminacion
 from Funciones.cola import obtener_pendientes, confirmar_procesado, marcar_fallo
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -108,3 +108,20 @@ def completar_descarga(solicitud_id: int, datos: DescargaCompletarIn, db: Sessio
     solicitud.listo = True
     db.commit()
     return {"mensaje": "Descarga lista"}
+
+
+@router.get("/eliminaciones-pendientes", dependencies=[Depends(_verificar_worker)])
+def eliminaciones_pendientes(db: Session = Depends(obtener_db)):
+    """La laptop pregunta que archivos fisicos tiene que borrar de la SSD."""
+    pendientes = db.query(SolicitudEliminacion).filter(SolicitudEliminacion.listo.is_(False)).all()
+    return [{"id": p.id, "ruta_ssd": p.ruta_ssd} for p in pendientes]
+
+
+@router.post("/eliminaciones-pendientes/{solicitud_id}/completar", dependencies=[Depends(_verificar_worker)])
+def completar_eliminacion(solicitud_id: int, db: Session = Depends(obtener_db)):
+    solicitud = db.query(SolicitudEliminacion).filter(SolicitudEliminacion.id == solicitud_id).first()
+    if not solicitud:
+        raise HTTPException(404, "Solicitud no encontrada")
+    db.delete(solicitud)
+    db.commit()
+    return {"mensaje": "Eliminacion confirmada"}

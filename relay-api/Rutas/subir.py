@@ -1,11 +1,11 @@
 import hashlib
 from typing import List
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
 
 from Datos.db import obtener_db
-from Datos.modelos import Usuario, Archivo
+from Datos.modelos import Usuario, Archivo, ColaSync, SolicitudDescarga, SolicitudEliminacion
 from Utils.seguridad import obtener_usuario_actual
 from Funciones.cola import encolar
 
@@ -64,3 +64,34 @@ async def subir_archivos(
         })
 
     return {"resultados": resultados}
+
+
+@router.delete("/{archivo_id}")
+def eliminar_archivo(
+    archivo_id: int,
+    db: Session = Depends(obtener_db),
+    usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """Borra un archivo. Solo quien lo subio o un admin pueden hacerlo.
+    El registro se borra al toque de la base; el archivo fisico en la
+    SSD se elimina la proxima vez que la laptop se conecte."""
+    archivo = db.query(Archivo).filter(Archivo.id == archivo_id).first()
+    if not archivo:
+        raise HTTPException(404, "No encontrado")
+
+    puede_borrar = archivo.uploader_id == usuario.id or usuario.es_admin
+    if not puede_borrar:
+        raise HTTPException(403, "No tenes permiso para borrar este archivo")
+
+    # limpiar cualquier cola pendiente relacionada, para no dejar basura
+    db.query(ColaSync).filter(ColaSync.archivo_id == archivo_id).delete()
+    db.query(SolicitudDescarga).filter(SolicitudDescarga.archivo_id == archivo_id).delete()
+
+    # si ya se habia guardado en la SSD, avisarle a la laptop que lo borre fisicamente
+    if archivo.ruta_ssd:
+        db.add(SolicitudEliminacion(ruta_ssd=archivo.ruta_ssd, listo=False))
+
+    db.delete(archivo)
+    db.commit()
+
+    return {"mensaje": "Archivo eliminado"}

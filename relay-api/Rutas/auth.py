@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
+import os
 
 from Datos.db import obtener_db
 from Datos.modelos import Usuario, TokenRecuperacion
@@ -11,12 +12,15 @@ from Funciones.correo import enviar_email_recuperacion
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+CODIGO_INVITACION = os.getenv("CODIGO_INVITACION")
+
 
 class RegistroIn(BaseModel):
     username: str
     email: EmailStr
     password: str
     nombre_display: str
+    codigo_invitacion: str
 
 
 class LoginIn(BaseModel):
@@ -35,6 +39,9 @@ class ResetIn(BaseModel):
 
 @router.post("/registro")
 def registro(datos: RegistroIn, db: Session = Depends(obtener_db)):
+    if not CODIGO_INVITACION or datos.codigo_invitacion != CODIGO_INVITACION:
+        raise HTTPException(403, "Código de invitación inválido")
+
     existe = db.query(Usuario).filter(
         (Usuario.username == datos.username) | (Usuario.email == datos.email)
     ).first()

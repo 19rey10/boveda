@@ -33,6 +33,13 @@ def _puede_ver(archivo: Archivo, usuario: Usuario) -> bool:
     return archivo.es_publica or archivo.uploader_id == usuario.id or usuario.es_admin
 
 
+def _puede_descargar(archivo: Archivo, usuario: Usuario) -> bool:
+    """Descargar el original es mas restrictivo que verlo: aunque una
+    foto sea publica y cualquiera la pueda ver en la app, solo quien la
+    subio o un admin puede bajarse el archivo original a su dispositivo."""
+    return archivo.uploader_id == usuario.id or usuario.es_admin
+
+
 @router.get("/por-dia")
 def listar_por_dia(
     db: Session = Depends(obtener_db),
@@ -101,8 +108,8 @@ def descargar(
     archivo = db.query(Archivo).filter(Archivo.id == archivo_id).first()
     if not archivo:
         raise HTTPException(404, "No encontrado")
-    if not _puede_ver(archivo, usuario):
-        raise HTTPException(403, "No tenes permiso para ver este archivo")
+    if not _puede_descargar(archivo, usuario):
+        raise HTTPException(403, "Solo quien subio el archivo (o un admin) puede descargarlo")
 
     if not archivo.sincronizado or not archivo.ruta_ssd:
         return JSONResponse(

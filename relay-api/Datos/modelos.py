@@ -99,3 +99,19 @@ class SolicitudDescarga(Base):
     nombre_archivo = Column(String(255), nullable=True)
     listo = Column(Boolean, default=False)
     creado_en = Column(DateTime, default=datetime.utcnow)
+
+
+class SolicitudEliminacion(Base):
+    """
+    Cuando se borra un archivo, el registro de la base se borra al toque,
+    pero el archivo fisico sigue en la SSD hasta que la laptop se conecte
+    y lo elimine. Guardamos la ruta directo aca (no una relacion al
+    Archivo) porque el Archivo ya se borro para cuando la laptop procesa
+    esto.
+    """
+    __tablename__ = "solicitudes_eliminacion"
+
+    id = Column(Integer, primary_key=True)
+    ruta_ssd = Column(String(500), nullable=False)
+    listo = Column(Boolean, default=False)
+    creado_en = Column(DateTime, default=datetime.utcnow)
