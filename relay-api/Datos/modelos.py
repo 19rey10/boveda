@@ -81,3 +81,21 @@ class TokenRecuperacion(Base):
     token = Column(String(120), unique=True, nullable=False, index=True)
     expira_en = Column(DateTime, nullable=False)
     usado = Column(Boolean, default=False)
+
+
+class SolicitudDescarga(Base):
+    """
+    Cuando un usuario pide descargar el archivo original, el relay no lo
+    tiene (solo la laptop, en la SSD). Se crea un pedido aca, la laptop
+    lo ve la proxima vez que hace polling, sube el archivo, y el usuario
+    lo descarga desde el relay. Es de un solo uso: se borra despues de
+    entregarse.
+    """
+    __tablename__ = "solicitudes_descarga"
+
+    id = Column(Integer, primary_key=True)
+    archivo_id = Column(Integer, ForeignKey("archivos.id"), nullable=False)
+    contenido_blob = Column(LargeBinary, nullable=True)
+    nombre_archivo = Column(String(255), nullable=True)
+    listo = Column(Boolean, default=False)
+    creado_en = Column(DateTime, default=datetime.utcnow)

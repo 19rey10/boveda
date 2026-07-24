@@ -1,6 +1,6 @@
 """
 Extrae la fecha REAL en que se tomo la foto/video (no la de subida),
-para poder organizar todo por dia real.
+para poder organizar todo por dia real. Tambien genera miniaturas.
 """
 import subprocess
 import json
@@ -9,6 +9,21 @@ from io import BytesIO
 
 from PIL import Image
 from PIL.ExifTags import TAGS
+
+
+def generar_miniatura(contenido: bytes) -> bytes | None:
+    """Genera una miniatura JPEG chica (max 400x400) para mostrar en la
+    galeria sin tener que mandar la imagen completa. Devuelve None si
+    no se pudo (ej: es un video, o el archivo esta corrupto)."""
+    try:
+        img = Image.open(BytesIO(contenido))
+        img = img.convert("RGB")
+        img.thumbnail((400, 400))
+        buffer = BytesIO()
+        img.save(buffer, format="JPEG", quality=80)
+        return buffer.getvalue()
+    except Exception:
+        return None
 
 
 def fecha_de_imagen(contenido: bytes) -> datetime | None:

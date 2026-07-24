@@ -1,7 +1,8 @@
 """
 Corre en tu laptop. Cada N segundos revisa si el relay esta online y si
 hay archivos pendientes; si los hay, los baja, les saca la fecha real
-(EXIF/metadata), los guarda en la SSD organizados, y confirma al relay.
+(EXIF/metadata), los guarda en la SSD organizados, sube una miniatura,
+y confirma al relay. Tambien resuelve pedidos de descarga del original.
 
 Uso:
     python main.py
@@ -21,9 +22,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from Utils.cliente_relay import (
-    obtener_pendientes, confirmar, marcar_fallo, relay_esta_online
+    obtener_pendientes, confirmar, marcar_fallo, relay_esta_online,
+    subir_miniatura, obtener_descargas_pendientes, completar_descarga,
 )
-from Funciones.exif_utils import fecha_de_imagen, fecha_de_video
+from Funciones.exif_utils import fecha_de_imagen, fecha_de_video, generar_miniatura
 from Funciones.almacenamiento import guardar_archivo, espacio_disponible_gb
 
 INTERVALO_SEGUNDOS = int(os.getenv("INTERVALO_POLLING", "30"))
@@ -45,14 +47,43 @@ def procesar_item(item: dict):
 
     fecha = fecha or datetime.utcnow()  # fallback: fecha de subida
 
-    # NOTA: el username y es_publica en este esqueleto vendrian del
-    # archivo_id consultando /sync/pendientes con mas detalle - ampliar
-    # el endpoint del relay para incluir esos campos segun tu esquema final.
     username = item.get("username", "usuario_desconocido")
     es_publica = item.get("es_publica", False)
 
     ruta_final = guardar_archivo(contenido, username, es_publica, fecha, nombre_original)
+
+    # generar y subir miniatura (por ahora solo para imagenes)
+    if not es_video:
+        miniatura = generar_miniatura(contenido)
+        if miniatura:
+            subir_miniatura(item["archivo_id"], miniatura)
+
     return ruta_final
+
+
+def procesar_descargas_pendientes():
+    """Revisa si algun usuario pidio descargar un archivo original, lo
+    busca en la SSD, y se lo manda de vuelta al relay para que se lo
+    entregue."""
+    try:
+        pendientes = obtener_descargas_pendientes()
+    except Exception as e:
+        print(f"  No se pudo consultar descargas pendientes: {e}")
+        return
+
+    for p in pendientes:
+        ruta = p.get("ruta_ssd")
+        if not ruta or not os.path.exists(ruta):
+            continue
+
+        try:
+            with open(ruta, "rb") as f:
+                contenido = f.read()
+            nombre = os.path.basename(ruta)
+            completar_descarga(p["solicitud_id"], contenido, nombre)
+            print(f"  Descarga resuelta -> {nombre}")
+        except Exception as e:
+            print(f"  Error resolviendo descarga de {ruta}: {e}")
 
 
 def ciclo():
@@ -65,19 +96,18 @@ def ciclo():
         print(f"[{datetime.now()}] ADVERTENCIA: solo quedan {espacio}GB libres en la SSD")
 
     pendientes = obtener_pendientes()
-    if not pendientes:
-        return
+    if pendientes:
+        print(f"[{datetime.now()}] Procesando {len(pendientes)} archivos pendientes...")
+        for item in pendientes:
+            try:
+                ruta_final = procesar_item(item)
+                confirmar(item["cola_id"], ruta_final)
+                print(f"  OK -> {ruta_final}")
+            except Exception as e:
+                print(f"  ERROR con {item['nombre_original']}: {e}")
+                marcar_fallo(item["cola_id"])
 
-    print(f"[{datetime.now()}] Procesando {len(pendientes)} archivos pendientes...")
-
-    for item in pendientes:
-        try:
-            ruta_final = procesar_item(item)
-            confirmar(item["cola_id"], ruta_final)
-            print(f"  OK -> {ruta_final}")
-        except Exception as e:
-            print(f"  ERROR con {item['nombre_original']}: {e}")
-            marcar_fallo(item["cola_id"])
+    procesar_descargas_pendientes()
 
 
 if __name__ == "__main__":

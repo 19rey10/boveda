@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
+import mimetypes
+from datetime import datetime
 from io import BytesIO
 
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
+from sqlalchemy.orm import Session
+from sqlalchemy import or_
+
 from Datos.db import obtener_db
-from Datos.modelos import Usuario, Archivo
+from Datos.modelos import Usuario, Archivo, SolicitudDescarga
 from Utils.seguridad import obtener_usuario_actual
 
 router = APIRouter(prefix="/galeria", tags=["galeria"])
@@ -24,6 +27,10 @@ def _visible_para(usuario: Usuario):
         Archivo.es_publica.is_(True),
         Archivo.uploader_id == usuario.id,
     )
+
+
+def _puede_ver(archivo: Archivo, usuario: Usuario) -> bool:
+    return archivo.es_publica or archivo.uploader_id == usuario.id or usuario.es_admin
 
 
 @router.get("/por-dia")
@@ -61,8 +68,8 @@ def buscar(
     return [_serializar(a, usuario) for a in query.all()]
 
 
-@router.get("/{archivo_id}/descargar")
-def descargar(
+@router.get("/{archivo_id}/miniatura")
+def miniatura(
     archivo_id: int,
     db: Session = Depends(obtener_db),
     usuario: Usuario = Depends(obtener_usuario_actual),
@@ -70,21 +77,84 @@ def descargar(
     archivo = db.query(Archivo).filter(Archivo.id == archivo_id).first()
     if not archivo:
         raise HTTPException(404, "No encontrado")
+    if not _puede_ver(archivo, usuario):
+        raise HTTPException(403, "No tenes permiso para ver este archivo")
+    if not archivo.thumbnail_blob:
+        raise HTTPException(404, "Miniatura no disponible todavia")
 
-    puede_ver = archivo.es_publica or archivo.uploader_id == usuario.id or usuario.es_admin
-    if not puede_ver:
+    return StreamingResponse(BytesIO(archivo.thumbnail_blob), media_type="image/jpeg")
+
+
+@router.get("/{archivo_id}/descargar")
+def descargar(
+    archivo_id: int,
+    db: Session = Depends(obtener_db),
+    usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """
+    El relay no tiene el archivo original (solo la laptop, en la SSD).
+    Primera vez que se pide: se crea una solicitud y la laptop la ve en
+    su proximo ciclo de polling, sube el archivo, y ahi si se entrega.
+    El frontend deberia reintentar cada pocos segundos mientras reciba
+    estado "preparando".
+    """
+    archivo = db.query(Archivo).filter(Archivo.id == archivo_id).first()
+    if not archivo:
+        raise HTTPException(404, "No encontrado")
+    if not _puede_ver(archivo, usuario):
         raise HTTPException(403, "No tenes permiso para ver este archivo")
 
     if not archivo.sincronizado or not archivo.ruta_ssd:
-        raise HTTPException(
-            409,
-            "El archivo todavia esta en cola, esperando a que el servidor "
-            "de la laptop se conecte para guardarlo definitivamente.",
+        return JSONResponse(
+            status_code=409,
+            content={
+                "estado": "en_cola",
+                "mensaje": "El archivo todavia esta en cola, esperando a que "
+                           "el servidor de la laptop se conecte para guardarlo.",
+            },
         )
 
-    # En produccion esto redirige/streamea desde la laptop via el tunel
-    # de Tailscale. Placeholder aca:
-    raise HTTPException(501, "Descarga desde SSD: implementar proxy hacia worker-local")
+    # ¿ya hay una solicitud lista para entregar?
+    lista = (
+        db.query(SolicitudDescarga)
+        .filter(SolicitudDescarga.archivo_id == archivo_id, SolicitudDescarga.listo.is_(True))
+        .order_by(SolicitudDescarga.creado_en.desc())
+        .first()
+    )
+    if lista:
+        contenido = lista.contenido_blob
+        nombre = lista.nombre_archivo or f"archivo_{archivo_id}"
+        db.delete(lista)
+        db.commit()
+
+        media_type, _ = mimetypes.guess_type(nombre)
+        media_type = media_type or "application/octet-stream"
+
+        return StreamingResponse(
+            BytesIO(contenido),
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+        )
+
+    # ¿ya hay una solicitud pendiente sin resolver? no duplicar
+    pendiente = (
+        db.query(SolicitudDescarga)
+        .filter(SolicitudDescarga.archivo_id == archivo_id, SolicitudDescarga.listo.is_(False))
+        .first()
+    )
+    if not pendiente:
+        nueva = SolicitudDescarga(archivo_id=archivo_id, listo=False)
+        db.add(nueva)
+        db.commit()
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "estado": "preparando",
+            "mensaje": "Pidiendole el archivo original al servidor de "
+                       "almacenamiento. Volve a intentar en unos segundos.",
+        },
+    )
 
 
 def _serializar(a: Archivo, usuario: Usuario) -> dict:
@@ -98,4 +168,5 @@ def _serializar(a: Archivo, usuario: Usuario) -> dict:
         "fecha_subida": a.fecha_subida.isoformat(),
         "sincronizado": a.sincronizado,
         "tamano_bytes": a.tamano_bytes,
+        "tiene_miniatura": a.thumbnail_blob is not None,
     }
