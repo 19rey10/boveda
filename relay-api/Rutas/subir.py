@@ -1,4 +1,5 @@
 import hashlib
+import os
 from typing import List
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
@@ -11,6 +12,8 @@ from Funciones.cola import encolar
 from Funciones.notificaciones import programar_notificaciones_subida
 
 router = APIRouter(prefix="/archivos", tags=["archivos"])
+
+TAMANO_MAXIMO_MB = int(os.getenv("TAMANO_MAXIMO_MB", "150"))
 
 
 @router.post("/subir")
@@ -31,6 +34,18 @@ async def subir_archivos(
 
     for archivo in archivos:
         contenido = await archivo.read()
+
+        tamano_mb = len(contenido) / (1024 * 1024)
+        if tamano_mb > TAMANO_MAXIMO_MB:
+            resultados.append({
+                "nombre": archivo.filename,
+                "estado": "muy_grande",
+                "mensaje": f"Supera el máximo de {TAMANO_MAXIMO_MB}MB por archivo "
+                           f"(este pesa {tamano_mb:.0f}MB). Probá comprimirlo o "
+                           f"acortar el video.",
+            })
+            continue
+
         hash_archivo = hashlib.sha256(contenido).hexdigest()
 
         ya_existe = db.query(Archivo).filter(Archivo.hash_sha256 == hash_archivo).first()
