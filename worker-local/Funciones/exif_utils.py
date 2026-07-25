@@ -26,6 +26,25 @@ def generar_miniatura(contenido: bytes) -> bytes | None:
         return None
 
 
+def generar_miniatura_video(ruta_temporal: str) -> bytes | None:
+    """Extrae un frame del segundo 1 del video con ffmpeg y lo convierte
+    en miniatura JPEG chica. Requiere ffmpeg instalado."""
+    try:
+        resultado = subprocess.run(
+            [
+                "ffmpeg", "-y", "-ss", "1", "-i", ruta_temporal,
+                "-vframes", "1", "-vf", "scale=400:-1",
+                "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
+            ],
+            capture_output=True, timeout=20,
+        )
+        if resultado.returncode == 0 and resultado.stdout:
+            return resultado.stdout
+    except Exception:
+        pass
+    return None
+
+
 def fecha_de_imagen(contenido: bytes) -> datetime | None:
     try:
         img = Image.open(BytesIO(contenido))

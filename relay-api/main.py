@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from Datos.db import crear_tablas
-from Rutas import auth, subir, galeria, sync, admin
+from Rutas import auth, subir, galeria, sync, admin, notificaciones
 
 app = FastAPI(title="Boveda - Relay", version="0.1")
 
@@ -22,6 +22,7 @@ app.include_router(subir.router)
 app.include_router(galeria.router)
 app.include_router(sync.router)
 app.include_router(admin.router)
+app.include_router(notificaciones.router)
 
 
 @app.on_event("startup")

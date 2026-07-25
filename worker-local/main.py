@@ -24,9 +24,11 @@ load_dotenv()
 from Utils.cliente_relay import (
     obtener_pendientes, confirmar, marcar_fallo, relay_esta_online,
     subir_miniatura, obtener_descargas_pendientes, completar_descarga,
-    obtener_eliminaciones_pendientes, completar_eliminacion,
+    obtener_eliminaciones_pendientes, completar_eliminacion, enviar_latido,
 )
-from Funciones.exif_utils import fecha_de_imagen, fecha_de_video, generar_miniatura
+from Funciones.exif_utils import (
+    fecha_de_imagen, fecha_de_video, generar_miniatura, generar_miniatura_video,
+)
 from Funciones.almacenamiento import guardar_archivo, espacio_disponible_gb
 
 INTERVALO_SEGUNDOS = int(os.getenv("INTERVALO_POLLING", "30"))
@@ -43,6 +45,9 @@ def procesar_item(item: dict):
             tmp.write(contenido)
             tmp.flush()
             fecha = fecha_de_video(tmp.name)
+            miniatura_video = generar_miniatura_video(tmp.name)
+            if miniatura_video:
+                subir_miniatura(item["archivo_id"], miniatura_video)
     else:
         fecha = fecha_de_imagen(contenido)
 
@@ -53,7 +58,7 @@ def procesar_item(item: dict):
 
     ruta_final = guardar_archivo(contenido, username, es_publica, fecha, nombre_original)
 
-    # generar y subir miniatura (por ahora solo para imagenes)
+    # generar y subir miniatura de imagen (la de video ya se hizo arriba)
     if not es_video:
         miniatura = generar_miniatura(contenido)
         if miniatura:
@@ -115,6 +120,8 @@ def ciclo():
     espacio = espacio_disponible_gb()
     if espacio < 5:
         print(f"[{datetime.now()}] ADVERTENCIA: solo quedan {espacio}GB libres en la SSD")
+
+    enviar_latido(espacio)
 
     pendientes = obtener_pendientes()
     if pendientes:

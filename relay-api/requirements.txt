@@ -6,3 +6,4 @@ pyjwt==2.9.0
 pydantic[email]==2.9.2
 python-multipart==0.0.9
 psycopg2-binary==2.9.9
+firebase-admin==6.5.0

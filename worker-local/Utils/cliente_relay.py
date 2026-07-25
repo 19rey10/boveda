@@ -78,3 +78,15 @@ def relay_esta_online() -> bool:
         return r.status_code == 200
     except requests.RequestException:
         return False
+
+
+def enviar_latido(espacio_libre_gb: float):
+    try:
+        requests.post(
+            f"{RELAY_URL}/sync/latido",
+            headers=HEADERS,
+            json={"espacio_libre_gb": espacio_libre_gb},
+            timeout=15,
+        )
+    except requests.RequestException:
+        pass

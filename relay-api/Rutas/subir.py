@@ -8,6 +8,7 @@ from Datos.db import obtener_db
 from Datos.modelos import Usuario, Archivo, ColaSync, SolicitudDescarga, SolicitudEliminacion
 from Utils.seguridad import obtener_usuario_actual
 from Funciones.cola import encolar
+from Funciones.notificaciones import notificar_nueva_subida
 
 router = APIRouter(prefix="/archivos", tags=["archivos"])
 
@@ -26,6 +27,7 @@ async def subir_archivos(
     que la laptop los baje y los guarde en la SSD organizada.
     """
     resultados = []
+    subidas_publicas = 0
 
     for archivo in archivos:
         contenido = await archivo.read()
@@ -55,6 +57,8 @@ async def subir_archivos(
         db.refresh(registro)
 
         encolar(db, registro, contenido, archivo.filename)
+        if es_publica:
+            subidas_publicas += 1
 
         resultados.append({
             "nombre": archivo.filename,
@@ -62,6 +66,9 @@ async def subir_archivos(
             "archivo_id": registro.id,
             "mensaje": "Subido. Se guardara en la SSD cuando el servidor este en linea.",
         })
+
+    if subidas_publicas > 0:
+        notificar_nueva_subida(db, usuario.id, usuario.nombre_display, descripcion, subidas_publicas)
 
     return {"resultados": resultados}
 

@@ -5,13 +5,14 @@ login de usuarios normales.
 """
 import base64
 import os
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from Datos.db import obtener_db
-from Datos.modelos import Archivo, Usuario, SolicitudDescarga, SolicitudEliminacion
+from Datos.modelos import Archivo, Usuario, SolicitudDescarga, SolicitudEliminacion, EstadoWorker
 from Funciones.cola import obtener_pendientes, confirmar_procesado, marcar_fallo
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -31,6 +32,25 @@ class MiniaturaIn(BaseModel):
 class DescargaCompletarIn(BaseModel):
     contenido_base64: str
     nombre_archivo: str
+
+
+class LatidoIn(BaseModel):
+    espacio_libre_gb: float
+
+
+@router.post("/latido", dependencies=[Depends(_verificar_worker)])
+def latido(datos: LatidoIn, db: Session = Depends(obtener_db)):
+    """La laptop avisa que sigue viva y cuanto espacio libre le queda,
+    para que el panel admin lo pueda mostrar."""
+    estado = db.query(EstadoWorker).first()
+    if not estado:
+        estado = EstadoWorker()
+        db.add(estado)
+
+    estado.ultimo_contacto = datetime.utcnow()
+    estado.espacio_libre_gb = int(datos.espacio_libre_gb)
+    db.commit()
+    return {"mensaje": "ok"}
 
 
 @router.get("/pendientes", dependencies=[Depends(_verificar_worker)])

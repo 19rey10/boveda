@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from datetime import datetime
 import secrets
 
 from Datos.db import obtener_db
-from Datos.modelos import Usuario, Archivo, ColaSync, CodigoInvitacion
+from Datos.modelos import Usuario, Archivo, ColaSync, CodigoInvitacion, EstadoWorker
 from Utils.seguridad import requiere_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -17,11 +18,19 @@ def resumen(db: Session = Depends(obtener_db), _: Usuario = Depends(requiere_adm
     pendientes_sync = db.query(func.count(ColaSync.id)).scalar()
     total_bytes = db.query(func.sum(Archivo.tamano_bytes)).scalar() or 0
 
+    estado_worker = db.query(EstadoWorker).first()
+    minutos_desde_ultimo_contacto = None
+    if estado_worker and estado_worker.ultimo_contacto:
+        delta = datetime.utcnow() - estado_worker.ultimo_contacto
+        minutos_desde_ultimo_contacto = round(delta.total_seconds() / 60, 1)
+
     return {
         "total_usuarios": total_usuarios,
         "total_archivos": total_archivos,
         "pendientes_sync": pendientes_sync,
         "total_gb_estimado": round(total_bytes / (1024 ** 3), 2),
+        "worker_minutos_desde_ultimo_contacto": minutos_desde_ultimo_contacto,
+        "worker_ssd_espacio_libre_gb": estado_worker.espacio_libre_gb if estado_worker else None,
     }
 
 

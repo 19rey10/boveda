@@ -131,3 +131,31 @@ class CodigoInvitacion(Base):
     usado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
     creado_en = Column(DateTime, default=datetime.utcnow)
     usado_en = Column(DateTime, nullable=True)
+
+
+class EstadoWorker(Base):
+    """
+    Una sola fila que se va actualizando cada vez que la laptop hace
+    polling. Sirve para que el admin vea si el worker esta activo o
+    lleva mucho tiempo sin conectarse, y cuanto espacio libre queda en
+    la SSD.
+    """
+    __tablename__ = "estado_worker"
+
+    id = Column(Integer, primary_key=True)
+    ultimo_contacto = Column(DateTime, nullable=True)
+    espacio_libre_gb = Column(Integer, nullable=True)
+
+
+class TokenPush(Base):
+    """
+    Token de notificaciones push (Firebase) de cada dispositivo. Un
+    usuario puede tener mas de un dispositivo, por eso no es unico por
+    usuario sino por token.
+    """
+    __tablename__ = "tokens_push"
+
+    id = Column(Integer, primary_key=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    token = Column(String(300), unique=True, nullable=False)
+    creado_en = Column(DateTime, default=datetime.utcnow)

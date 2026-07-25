@@ -68,7 +68,17 @@ def buscar(
     usuario: Usuario = Depends(obtener_usuario_actual),
 ):
     filtro = _visible_para(usuario)
-    query = db.query(Archivo).filter(Archivo.descripcion.ilike(f"%{q}%"))
+    query = (
+        db.query(Archivo)
+        .join(Usuario, Archivo.uploader_id == Usuario.id)
+        .filter(
+            or_(
+                Archivo.descripcion.ilike(f"%{q}%"),
+                Usuario.username.ilike(f"%{q}%"),
+                Usuario.nombre_display.ilike(f"%{q}%"),
+            )
+        )
+    )
     if filtro is not None:
         query = query.filter(filtro)
 
@@ -226,6 +236,7 @@ def _serializar(a: Archivo, usuario: Usuario) -> dict:
         "descripcion": a.descripcion,
         "es_publica": a.es_publica,
         "es_mio": a.uploader_id == usuario.id,
+        "subido_por": a.uploader.nombre_display if a.uploader else None,
         "fecha_tomada": a.fecha_tomada.isoformat() if a.fecha_tomada else None,
         "fecha_subida": a.fecha_subida.isoformat(),
         "sincronizado": a.sincronizado,
