@@ -1,11 +1,12 @@
 import hashlib
 import os
+import shutil
 from typing import List
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from Datos.db import obtener_db
+from Datos.db import obtener_db, SessionLocal
 from Datos.modelos import Usuario, Archivo, ColaSync, SolicitudDescarga, SolicitudEliminacion
 from Utils.seguridad import obtener_usuario_actual
 from Funciones.cola import encolar
@@ -14,6 +15,7 @@ from Funciones.notificaciones import programar_notificaciones_subida
 router = APIRouter(prefix="/archivos", tags=["archivos"])
 
 TAMANO_MAXIMO_MB = int(os.getenv("TAMANO_MAXIMO_MB", "150"))
+CARPETA_CHUNKS = "/tmp/boveda_subidas_chunk"
 
 
 @router.post("/subir")
@@ -117,3 +119,114 @@ def eliminar_archivo(
     db.commit()
 
     return {"mensaje": "Archivo eliminado"}
+
+
+def _finalizar_subida_en_fondo(
+    ruta_ensamblada: str, carpeta_sesion: str, uploader_id: int,
+    uploader_nombre: str, nombre_original: str, descripcion: str, es_publica: bool,
+):
+    """
+    Corre DESPUES de responderle al celular (para no hacerlo esperar el
+    guardado en la base de datos, que puede tardar con archivos
+    grandes). Abre su propia sesion de DB porque la del request original
+    ya se cerro para cuando esto corre.
+    """
+    db = SessionLocal()
+    try:
+        hasher = hashlib.sha256()
+        with open(ruta_ensamblada, "rb") as f:
+            while True:
+                bloque = f.read(1024 * 1024)
+                if not bloque:
+                    break
+                hasher.update(bloque)
+        hash_archivo = hasher.hexdigest()
+
+        ya_existe = db.query(Archivo).filter(Archivo.hash_sha256 == hash_archivo).first()
+        if ya_existe:
+            return
+
+        with open(ruta_ensamblada, "rb") as f:
+            contenido = f.read()
+
+        tipo = "video" if nombre_original.lower().endswith((".mp4", ".mov", ".avi", ".mkv")) else "imagen"
+
+        registro = Archivo(
+            uploader_id=uploader_id,
+            hash_sha256=hash_archivo,
+            tipo=tipo,
+            es_publica=es_publica,
+            descripcion=descripcion,
+            tamano_bytes=len(contenido),
+        )
+        db.add(registro)
+        db.commit()
+        db.refresh(registro)
+
+        encolar(db, registro, contenido, nombre_original)
+
+        if es_publica:
+            programar_notificaciones_subida(db, uploader_id, uploader_nombre, descripcion, 1)
+    finally:
+        db.close()
+        shutil.rmtree(carpeta_sesion, ignore_errors=True)
+
+
+@router.post("/subir-chunk")
+async def subir_chunk(
+    background_tasks: BackgroundTasks,
+    chunk: UploadFile = File(...),
+    upload_id: str = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    nombre_original: str = Form(...),
+    descripcion: str = Form(""),
+    es_publica: bool = Form(False),
+    usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """
+    Recibe un video/foto pesado de a pedacitos, para que ningun pedido
+    individual tarde tanto como para que Render lo corte por timeout.
+    El cliente manda cada chunk en orden; cuando llega el ultimo, se
+    ensambla el archivo completo y se guarda en cola en segundo plano.
+    """
+    carpeta_sesion = os.path.join(CARPETA_CHUNKS, f"{usuario.id}_{upload_id}")
+    os.makedirs(carpeta_sesion, exist_ok=True)
+
+    ruta_parte = os.path.join(carpeta_sesion, f"{chunk_index:06d}.part")
+    contenido_parte = await chunk.read()
+
+    tamano_hasta_ahora_mb = sum(
+        os.path.getsize(os.path.join(carpeta_sesion, f))
+        for f in os.listdir(carpeta_sesion)
+    ) / (1024 * 1024)
+    if tamano_hasta_ahora_mb + len(contenido_parte) / (1024 * 1024) > TAMANO_MAXIMO_MB:
+        shutil.rmtree(carpeta_sesion, ignore_errors=True)
+        raise HTTPException(
+            413,
+            f"Supera el máximo de {TAMANO_MAXIMO_MB}MB por archivo. "
+            f"Probá comprimirlo o acortar el video.",
+        )
+
+    with open(ruta_parte, "wb") as f:
+        f.write(contenido_parte)
+
+    partes_recibidas = len(os.listdir(carpeta_sesion))
+    if partes_recibidas < total_chunks:
+        return {"estado": "recibiendo", "partes_recibidas": partes_recibidas, "total_chunks": total_chunks}
+
+    # llegaron todas las partes: ensamblar el archivo completo
+    ruta_ensamblada = os.path.join(carpeta_sesion, "_completo")
+    with open(ruta_ensamblada, "wb") as destino:
+        for i in range(total_chunks):
+            ruta_parte_i = os.path.join(carpeta_sesion, f"{i:06d}.part")
+            with open(ruta_parte_i, "rb") as origen:
+                shutil.copyfileobj(origen, destino)
+
+    background_tasks.add_task(
+        _finalizar_subida_en_fondo,
+        ruta_ensamblada, carpeta_sesion, usuario.id, usuario.nombre_display,
+        nombre_original, descripcion, es_publica,
+    )
+
+    return {"estado": "completo", "mensaje": "Archivo recibido, procesando..."}
