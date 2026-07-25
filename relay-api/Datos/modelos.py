@@ -159,3 +159,22 @@ class TokenPush(Base):
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     token = Column(String(300), unique=True, nullable=False)
     creado_en = Column(DateTime, default=datetime.utcnow)
+
+
+class NotificacionPendiente(Base):
+    """
+    Notificaciones de "alguien subio algo" programadas con un retraso
+    random distinto por usuario, para que no lleguen todas juntas ni en
+    horario de trabajo. Un proceso en segundo plano las revisa cada
+    minuto y manda las que ya llegaron a su hora.
+    """
+    __tablename__ = "notificaciones_pendientes"
+
+    id = Column(Integer, primary_key=True)
+    usuario_destino_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    uploader_nombre = Column(String(80), nullable=False)
+    descripcion = Column(Text, nullable=True)
+    cantidad = Column(Integer, default=1)
+    enviar_en = Column(DateTime, nullable=False, index=True)
+    enviada = Column(Boolean, default=False, index=True)
+    creado_en = Column(DateTime, default=datetime.utcnow)

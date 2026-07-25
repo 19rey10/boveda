@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "506332141744",
+    "project_id": "boveda-c93b8",
+    "storage_bucket": "boveda-c93b8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:506332141744:android:31c416063f2e6a8f6c8375",
+        "android_client_info": {
+          "package_name": "com.aistudio.boveda.familyvault"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBHaQercqPcgJJ2fEduEvoPSnyIxjVASVY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

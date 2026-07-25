@@ -8,7 +8,7 @@ from Datos.db import obtener_db
 from Datos.modelos import Usuario, Archivo, ColaSync, SolicitudDescarga, SolicitudEliminacion
 from Utils.seguridad import obtener_usuario_actual
 from Funciones.cola import encolar
-from Funciones.notificaciones import notificar_nueva_subida
+from Funciones.notificaciones import programar_notificaciones_subida
 
 router = APIRouter(prefix="/archivos", tags=["archivos"])
 
@@ -68,7 +68,7 @@ async def subir_archivos(
         })
 
     if subidas_publicas > 0:
-        notificar_nueva_subida(db, usuario.id, usuario.nombre_display, descripcion, subidas_publicas)
+        programar_notificaciones_subida(db, usuario.id, usuario.nombre_display, descripcion, subidas_publicas)
 
     return {"resultados": resultados}
 
