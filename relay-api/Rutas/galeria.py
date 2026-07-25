@@ -34,9 +34,9 @@ def _puede_ver(archivo: Archivo, usuario: Usuario) -> bool:
 
 
 def _puede_descargar(archivo: Archivo, usuario: Usuario) -> bool:
-    """Descargar el original es mas restrictivo que verlo: aunque una
-    foto sea publica y cualquiera la pueda ver en la app, solo quien la
-    subio o un admin puede bajarse el archivo original a su dispositivo."""
+    """Descargar el original a tu dispositivo es mas restrictivo que
+    verlo: aunque una foto sea publica y cualquiera la pueda ver en la
+    app, solo quien la subio o un admin puede bajarsela."""
     return archivo.uploader_id == usuario.id or usuario.es_admin
 
 
@@ -92,6 +92,86 @@ def miniatura(
     return StreamingResponse(BytesIO(archivo.thumbnail_blob), media_type="image/jpeg")
 
 
+def _resolver_original_o_encolar(db: Session, archivo: Archivo):
+    """
+    Logica compartida entre /descargar y /completa: busca si ya hay una
+    copia del original lista para entregar (pedida por otra llamada
+    reciente), y si no, encola un pedido nuevo para que la laptop lo
+    suba. Devuelve ("listo", contenido, nombre) o ("preparando", None, None).
+    """
+    lista = (
+        db.query(SolicitudDescarga)
+        .filter(SolicitudDescarga.archivo_id == archivo.id, SolicitudDescarga.listo.is_(True))
+        .order_by(SolicitudDescarga.creado_en.desc())
+        .first()
+    )
+    if lista:
+        contenido = lista.contenido_blob
+        nombre = lista.nombre_archivo or f"archivo_{archivo.id}"
+        db.delete(lista)
+        db.commit()
+        return "listo", contenido, nombre
+
+    pendiente = (
+        db.query(SolicitudDescarga)
+        .filter(SolicitudDescarga.archivo_id == archivo.id, SolicitudDescarga.listo.is_(False))
+        .first()
+    )
+    if not pendiente:
+        nueva = SolicitudDescarga(archivo_id=archivo.id, listo=False)
+        db.add(nueva)
+        db.commit()
+
+    return "preparando", None, None
+
+
+@router.get("/{archivo_id}/completa")
+def ver_completa(
+    archivo_id: int,
+    db: Session = Depends(obtener_db),
+    usuario: Usuario = Depends(obtener_usuario_actual),
+):
+    """
+    Imagen en su resolucion original, para mirarla en el visor de la app
+    (no para guardarla en el dispositivo). Cualquiera que pueda VER el
+    archivo (publico, o propio, o admin) puede pedir esto - es mas
+    permisivo que /descargar a proposito.
+    """
+    archivo = db.query(Archivo).filter(Archivo.id == archivo_id).first()
+    if not archivo:
+        raise HTTPException(404, "No encontrado")
+    if not _puede_ver(archivo, usuario):
+        raise HTTPException(403, "No tenes permiso para ver este archivo")
+
+    if not archivo.sincronizado or not archivo.ruta_ssd:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "estado": "en_cola",
+                "mensaje": "El archivo todavia esta en cola, esperando a que "
+                           "el servidor de la laptop se conecte para guardarlo.",
+            },
+        )
+
+    estado, contenido, nombre = _resolver_original_o_encolar(db, archivo)
+    if estado == "listo":
+        media_type, _ = mimetypes.guess_type(nombre)
+        media_type = media_type or "application/octet-stream"
+        return StreamingResponse(
+            BytesIO(contenido),
+            media_type=media_type,
+            headers={"Content-Disposition": "inline"},
+        )
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "estado": "preparando",
+            "mensaje": "Cargando la imagen en calidad completa...",
+        },
+    )
+
+
 @router.get("/{archivo_id}/descargar")
 def descargar(
     archivo_id: int,
@@ -99,11 +179,9 @@ def descargar(
     usuario: Usuario = Depends(obtener_usuario_actual),
 ):
     """
-    El relay no tiene el archivo original (solo la laptop, en la SSD).
-    Primera vez que se pide: se crea una solicitud y la laptop la ve en
-    su proximo ciclo de polling, sube el archivo, y ahi si se entrega.
-    El frontend deberia reintentar cada pocos segundos mientras reciba
-    estado "preparando".
+    Descarga el original AL DISPOSITIVO del usuario. Mas restrictivo que
+    /completa: solo el dueno del archivo o un admin pueden hacerlo,
+    aunque el archivo sea publico y cualquiera lo pueda ver en la app.
     """
     archivo = db.query(Archivo).filter(Archivo.id == archivo_id).first()
     if not archivo:
@@ -121,38 +199,15 @@ def descargar(
             },
         )
 
-    # ¿ya hay una solicitud lista para entregar?
-    lista = (
-        db.query(SolicitudDescarga)
-        .filter(SolicitudDescarga.archivo_id == archivo_id, SolicitudDescarga.listo.is_(True))
-        .order_by(SolicitudDescarga.creado_en.desc())
-        .first()
-    )
-    if lista:
-        contenido = lista.contenido_blob
-        nombre = lista.nombre_archivo or f"archivo_{archivo_id}"
-        db.delete(lista)
-        db.commit()
-
+    estado, contenido, nombre = _resolver_original_o_encolar(db, archivo)
+    if estado == "listo":
         media_type, _ = mimetypes.guess_type(nombre)
         media_type = media_type or "application/octet-stream"
-
         return StreamingResponse(
             BytesIO(contenido),
             media_type=media_type,
             headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
         )
-
-    # ¿ya hay una solicitud pendiente sin resolver? no duplicar
-    pendiente = (
-        db.query(SolicitudDescarga)
-        .filter(SolicitudDescarga.archivo_id == archivo_id, SolicitudDescarga.listo.is_(False))
-        .first()
-    )
-    if not pendiente:
-        nueva = SolicitudDescarga(archivo_id=archivo_id, listo=False)
-        db.add(nueva)
-        db.commit()
 
     return JSONResponse(
         status_code=202,
